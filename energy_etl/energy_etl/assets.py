@@ -83,29 +83,32 @@ def upsert(table: str, columns: list[str], rows: list[tuple], conflict_cols: lis
             execute_values(cur, sql, rows, page_size=1000)
 
 
-@dg.asset(partitions_def=MONTHLY)
+@dg.asset(partitions_def=MONTHLY, backfill_policy=dg.BackfillPolicy.single_run())
 def spot_prices(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     """Day-ahead spot prices (DK1+DK2). 15-min from DayAheadPrices since Oct 2025,
-    hourly from Elspotprices before that."""
+    hourly from Elspotprices before that; a window can span both sources."""
     window = context.partition_time_window
     area_filter = {"filter": json.dumps({"PriceArea": PRICE_AREAS})}
 
-    if window.start >= FIFTEEN_MIN_SWITCH:
-        records = fetch_records("DayAheadPrices", window.start, window.end, area_filter)
-        time_field, price_field = "TimeUTC", "DayAheadPriceDKK"
-    else:
-        records = fetch_records("Elspotprices", window.start, window.end, area_filter)
-        time_field, price_field = "HourUTC", "SpotPriceDKK"
-    context.log.info(f"Fetched {len(records)} price records for {context.partition_key}")
+    raw: list[tuple] = []  # (time_string, area, price_dkk_mwh)
+    if window.start < FIFTEEN_MIN_SWITCH:
+        hourly_end = min(window.end, FIFTEEN_MIN_SWITCH)
+        for r in fetch_records("Elspotprices", window.start, hourly_end, area_filter):
+            raw.append((r["HourUTC"], r["PriceArea"], r["SpotPriceDKK"]))
+    if window.end > FIFTEEN_MIN_SWITCH:
+        quarter_start = max(window.start, FIFTEEN_MIN_SWITCH)
+        for r in fetch_records("DayAheadPrices", quarter_start, window.end, area_filter):
+            raw.append((r["TimeUTC"], r["PriceArea"], r["DayAheadPriceDKK"]))
+    context.log.info(f"Fetched {len(raw)} price records for {context.partition_key_range}")
 
     rows = [
         (
-            parse_utc(r[time_field]),
-            r["PriceArea"],
-            r[price_field],
-            r[price_field] / 1000 * VAT_FACTOR if r[price_field] is not None else None,
+            parse_utc(time_string),
+            area,
+            price,
+            price / 1000 * VAT_FACTOR if price is not None else None,
         )
-        for r in records
+        for time_string, area, price in raw
     ]
     upsert(
         "spot_prices",
@@ -116,7 +119,7 @@ def spot_prices(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     return dg.MaterializeResult(metadata={"rows_upserted": len(rows)})
 
 
-@dg.asset(partitions_def=MONTHLY)
+@dg.asset(partitions_def=MONTHLY, backfill_policy=dg.BackfillPolicy.single_run())
 def production_forecasts(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     """Day-ahead wind/solar forecasts (DK1+DK2), pivoted from rows to columns."""
     window = context.partition_time_window
@@ -126,7 +129,7 @@ def production_forecasts(context: dg.AssetExecutionContext) -> dg.MaterializeRes
         window.end,
         {"filter": json.dumps({"PriceArea": PRICE_AREAS})},
     )
-    context.log.info(f"Fetched {len(records)} forecast records for {context.partition_key}")
+    context.log.info(f"Fetched {len(records)} forecast records for {context.partition_key_range}")
 
     merged: dict[tuple, dict] = {}
     for r in records:
@@ -154,12 +157,12 @@ def production_forecasts(context: dg.AssetExecutionContext) -> dg.MaterializeRes
     return dg.MaterializeResult(metadata={"rows_upserted": len(rows)})
 
 
-@dg.asset(partitions_def=MONTHLY)
+@dg.asset(partitions_def=MONTHLY, backfill_policy=dg.BackfillPolicy.single_run())
 def co2_emissions(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     """CO2 intensity of consumed power (DK1+DK2), 5-minute granularity."""
     window = context.partition_time_window
     records = fetch_records("CO2Emis", window.start, window.end)
-    context.log.info(f"Fetched {len(records)} CO2 records for {context.partition_key}")
+    context.log.info(f"Fetched {len(records)} CO2 records for {context.partition_key_range}")
 
     rows = [(parse_utc(r["Minutes5UTC"]), r["PriceArea"], r["CO2Emission"]) for r in records]
     upsert("co2_emissions", ["ts", "price_area", "co2_g_per_kwh"], rows, ["ts", "price_area"])
