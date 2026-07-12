@@ -36,14 +36,16 @@ CREATE TABLE IF NOT EXISTS co2_emissions (
 SELECT create_hypertable('co2_emissions', 'ts',
     chunk_time_interval => interval '1 month', if_not_exists => TRUE);
 
--- 4. Consumption per municipality x industry group, hourly (the volume driver)
-CREATE TABLE IF NOT EXISTS consumption_municipality (
-    ts               timestamptz NOT NULL,
-    municipality_no  text        NOT NULL,
-    industry_group   text        NOT NULL,
-    consumption_kwh  double precision,
-    created_at       timestamptz DEFAULT now(),
-    PRIMARY KEY (ts, municipality_no, industry_group)
+-- 4. Private consumption per municipality x housing x heating, hourly (the volume driver)
+-- Source: PrivateConsumptionHeatingHour (~647 rows/hour, history to 2021)
+CREATE TABLE IF NOT EXISTS private_consumption (
+    ts                 timestamptz NOT NULL,
+    municipality_code  integer     NOT NULL,
+    housing_category   text        NOT NULL,
+    heating_category   text        NOT NULL,
+    consumption_kwh    double precision,
+    created_at         timestamptz DEFAULT now(),
+    PRIMARY KEY (ts, municipality_code, housing_category, heating_category)
 );
-SELECT create_hypertable('consumption_municipality', 'ts',
+SELECT create_hypertable('private_consumption', 'ts',
     chunk_time_interval => interval '1 month', if_not_exists => TRUE);
