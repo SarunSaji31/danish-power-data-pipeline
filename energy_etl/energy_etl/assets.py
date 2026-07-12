@@ -57,15 +57,19 @@ def fetch_records(
         params.update(extra_params)
 
     for attempt in range(6):
-        response = requests.get(f"{API_BASE}/{dataset}", params=params, timeout=300)
+        try:
+            response = requests.get(f"{API_BASE}/{dataset}", params=params, timeout=300)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            # transient network drop (wifi blip, DNS failure) — wait and retry
+            time.sleep(60)
+            continue
         if response.status_code == 429:
             # message says "Try again in N seconds" but doesn't always parse; be generous
-            wait_seconds = 70
-            time.sleep(wait_seconds)
+            time.sleep(70)
             continue
         response.raise_for_status()
         return response.json()["records"]
-    raise RuntimeError(f"{dataset}: still rate-limited after {attempt + 1} attempts")
+    raise RuntimeError(f"{dataset}: gave up after {attempt + 1} attempts (rate limit or network)")
 
 
 def upsert(table: str, columns: list[str], rows: list[tuple], conflict_cols: list[str]) -> None:
