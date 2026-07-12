@@ -4,3 +4,5 @@ __pycache__/
 .env
 tmp*/
 .DS_Store
+backfill*.log
+backfill_state.txt
