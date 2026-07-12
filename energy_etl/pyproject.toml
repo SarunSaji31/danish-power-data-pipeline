@@ -1,12 +1,14 @@
 [project]
 name = "energy_etl"
 version = "0.1.0"
-description = "Add your description here"
+description = "Dagster + TimescaleDB pipeline for Danish electricity data (prices, wind/solar, CO2, consumption)"
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
 dependencies = [
     "dagster",
-    "dagster-cloud",
+    "dagster-postgres",
+    "psycopg2-binary",
+    "requests",
 ]
 
 [project.optional-dependencies]
