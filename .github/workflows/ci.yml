@@ -26,3 +26,27 @@ jobs:
 
       - name: Run tests
         run: python -m pytest energy_etl_tests/ -v
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to server over SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh root@"$SERVER_HOST" '
+            set -e
+            cd /opt/energy-etl/src && git pull --ff-only
+            cd energy_etl
+            docker build -t energy-etl-dagster:prod -f deploy/Dockerfile .
+            docker stop dagster_daemon && docker rm dagster_daemon
+            docker run -d --name dagster_daemon --network energy_v2 --restart always \
+              --memory=900m --env-file /opt/energy-etl/dagster.env energy-etl-dagster:prod
+          '
