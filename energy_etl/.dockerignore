@@ -1,0 +1,6 @@
+.env*
+backfill*.log
+backfill_state.txt
+__pycache__/
+*.pyc
+energy_etl_tests/

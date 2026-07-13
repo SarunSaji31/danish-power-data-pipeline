@@ -1,0 +1,29 @@
+# Production Dagster instance config (server: voxly, container: dagster_daemon).
+# Run history/schedule state live in Postgres (db "dagster" on timescale_prod),
+# so the daemon container is stateless and can be rebuilt freely.
+telemetry:
+  enabled: false
+
+storage:
+  postgres:
+    postgres_db:
+      hostname:
+        env: ENERGY_DB_HOST
+      username:
+        env: ENERGY_DB_USER
+      password:
+        env: ENERGY_DB_PASSWORD
+      db_name:
+        env: DAGSTER_PG_DB
+      port: 5432
+
+# One run at a time — the server has 2 vCPU / 3.7 GB shared with 11 other containers.
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 1
+
+run_retries:
+  enabled: true
+  max_retries: 2
