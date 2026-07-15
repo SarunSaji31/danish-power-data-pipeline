@@ -226,10 +226,57 @@ def cheapest_window(hourly_avg: dict[int, float], size: int = 3) -> tuple[list[i
     return best_window, best_cost
 
 
+PRICE_BAR_WIDTH = 8  # max blocks in the per-hour price bar
+
+
+def build_briefing_text(
+    day_label: str,
+    hourly_avg: dict[int, float],
+    wind: dict[int, float],
+    solar: dict[int, float],
+    best_window: list[int] | None,
+    best_cost: float | None,
+) -> str:
+    """Telegram-HTML briefing: bold summary + monospace <pre> hourly table with price bars."""
+    day_avg = sum(hourly_avg.values()) / len(hourly_avg)
+    low_hour = min(hourly_avg, key=hourly_avg.get)
+    high_hour = max(hourly_avg, key=hourly_avg.get)
+
+    lines = [
+        f"⚡ <b>DK1 Energy Brief</b> — {day_label}",
+        "",
+        f"💰 Avg <b>{day_avg:.2f} kr/kWh</b>",
+        f"🟢 Low {hourly_avg[low_hour]:.2f} at {low_hour:02d}:00 · "
+        f"🔴 High {hourly_avg[high_hour]:.2f} at {high_hour:02d}:00",
+    ]
+    if best_window:
+        lines.append(
+            f"🔌 Cheapest 3 h: <b>{best_window[0]:02d}:00–{best_window[-1] + 1:02d}:00</b>"
+            f" at {best_cost:.2f} kr/kWh"
+        )
+    if wind:
+        lines.append(
+            f"💨 Wind avg {sum(wind.values()) / len(wind):,.0f} MW · "
+            f"☀️ Solar peak {max(solar.values()):,.0f} MW"
+        )
+
+    # hourly table: monospace so columns align; bar visualizes price, ◀ marks cheapest window
+    max_price = max(hourly_avg.values())
+    window_hours = set(best_window or [])
+    table = [f"hr  kr/kWh  {'wind':>6}"]
+    for h in sorted(hourly_avg):
+        blocks = round(max(hourly_avg[h], 0) / max_price * PRICE_BAR_WIDTH) if max_price > 0 else 0
+        mark = " ◀" if h in window_hours else ""
+        table.append(f"{h:02d}  {hourly_avg[h]:6.2f}  {wind.get(h, 0):6,.0f}  {'▍' * blocks}{mark}")
+
+    lines += ["", "<pre>" + "\n".join(table) + "</pre>", "<i>◀ cheapest 3-hour window</i>"]
+    return "\n".join(lines)
+
+
 def send_telegram(text: str) -> None:
     response = requests.post(
         f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
-        json={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text},
+        json={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text, "parse_mode": "HTML"},
         timeout=30,
     )
     response.raise_for_status()
@@ -276,34 +323,11 @@ def telegram_briefing(context: dg.AssetExecutionContext) -> dg.MaterializeResult
     wind = {ts.astimezone(COPENHAGEN).hour: mw for ts, mw, _ in forecast_rows}
     solar = {ts.astimezone(COPENHAGEN).hour: mw for ts, _, mw in forecast_rows}
 
-    day_avg = sum(hourly_avg.values()) / len(hourly_avg)
-    cheapest_hour = min(hourly_avg, key=hourly_avg.get)
-    priciest_hour = max(hourly_avg, key=hourly_avg.get)
-
     # cheapest consecutive 3-hour window (for EV charging / appliances)
-    hours_sorted = sorted(hourly_avg)
     best_window, best_cost = cheapest_window(hourly_avg)
 
-    lines = [
-        f"⚡ DK1 Energy Brief — {day_label}",
-        f"Avg {day_avg:.2f} kr/kWh · Low {hourly_avg[cheapest_hour]:.2f} @{cheapest_hour:02d} "
-        f"· High {hourly_avg[priciest_hour]:.2f} @{priciest_hour:02d}",
-    ]
-    if best_window:
-        lines.append(
-            f"🔌 Cheapest 3h: {best_window[0]:02d}–{best_window[2] + 1:02d} ({best_cost:.2f} kr/kWh)"
-        )
-    if wind:
-        lines.append(
-            f"💨 Wind avg {sum(wind.values()) / len(wind):,.0f} MW · "
-            f"☀️ Solar peak {max(solar.values()):,.0f} MW"
-        )
-    lines.append("")
-    lines.append("Hour  kr/kWh  wind MW")
-    for h in hours_sorted:
-        lines.append(f"{h:02d}    {hourly_avg[h]:5.2f}   {wind.get(h, 0):6,.0f}")
-
-    send_telegram("\n".join(lines))
+    send_telegram(build_briefing_text(day_label, hourly_avg, wind, solar, best_window, best_cost))
+    day_avg = sum(hourly_avg.values()) / len(hourly_avg)
     return dg.MaterializeResult(
         metadata={"sent": "briefing", "hours": len(hourly_avg), "avg_price": round(day_avg, 3)}
     )

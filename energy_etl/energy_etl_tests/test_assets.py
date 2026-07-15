@@ -4,6 +4,7 @@ import pytest
 
 from energy_etl.assets import (
     FIFTEEN_MIN_SWITCH,
+    build_briefing_text,
     build_upsert_sql,
     cheapest_window,
     consumer_price,
@@ -57,3 +58,24 @@ class TestCheapestWindow:
 
     def test_too_few_hours_returns_none(self):
         assert cheapest_window({0: 1.0, 1: 1.0}) == (None, None)
+
+
+class TestBuildBriefingText:
+    def test_summary_table_and_window_markers(self):
+        hourly_avg = {0: 1.0, 1: 0.5, 2: 0.4, 3: 0.6, 4: 2.0}
+        wind = {h: 500.0 for h in hourly_avg}
+        solar = {h: 100.0 for h in hourly_avg}
+        text = build_briefing_text("Wed 15 Jul", hourly_avg, wind, solar, [1, 2, 3], 0.5)
+
+        assert "<b>DK1 Energy Brief</b> — Wed 15 Jul" in text
+        assert "Cheapest 3 h: <b>01:00–04:00</b> at 0.50 kr/kWh" in text
+        pre = text.split("<pre>")[1].split("</pre>")[0]
+        assert len(pre.splitlines()) == 1 + len(hourly_avg)  # header + one row per hour
+        assert pre.count("◀") == 3  # cheapest-window hours marked
+
+    def test_negative_price_gets_empty_bar(self):
+        hourly_avg = {0: -0.2, 1: 1.0, 2: 1.0, 3: 1.0}
+        text = build_briefing_text("Thu 16 Jul", hourly_avg, {}, {}, [0, 1, 2], 0.6)
+        row_hour_0 = next(l for l in text.splitlines() if l.startswith("00"))
+        assert "-0.20" in row_hour_0
+        assert "▍" not in row_hour_0
