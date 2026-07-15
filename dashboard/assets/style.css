@@ -1,0 +1,172 @@
+/* Dash serves everything in assets/ automatically. Tokens match theme.py. */
+
+body {
+    margin: 0;
+    background: #f9f9f7;
+    color: #0b0b0b;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.topbar {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    padding: 0.9rem 1.5rem;
+    background: #fcfcfb;
+    border-bottom: 1px solid #e1e0d9;
+}
+
+.brand {
+    font-weight: 650;
+    font-size: 1.05rem;
+}
+
+.topbar nav {
+    display: flex;
+    gap: 1.25rem;
+}
+
+.topbar nav a {
+    color: #52514e;
+    text-decoration: none;
+    font-size: 0.95rem;
+}
+
+.topbar nav a:hover {
+    color: #0b0b0b;
+}
+
+main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 1.5rem;
+}
+
+main h2 {
+    font-size: 1.3rem;
+    margin: 0.5rem 0 0.25rem;
+}
+
+.page-intro {
+    color: #52514e;
+    margin: 0 0 1.25rem;
+    max-width: 70ch;
+}
+
+.card {
+    background: #fcfcfb;
+    border: 1px solid rgba(11, 11, 11, 0.10);
+    border-radius: 10px;
+    padding: 0.75rem 0.75rem 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.kpi-tile {
+    background: #fcfcfb;
+    border: 1px solid rgba(11, 11, 11, 0.10);
+    border-radius: 10px;
+    padding: 0.9rem 1rem;
+}
+
+.kpi-label {
+    color: #52514e;
+    font-size: 0.85rem;
+}
+
+.kpi-value {
+    color: #0b0b0b;
+    font-weight: 600;
+    font-size: 1.7rem;
+    margin: 0.15rem 0;
+}
+
+.kpi-delta {
+    color: #52514e;
+    font-size: 0.82rem;
+}
+
+/* Status colors, delta text only — contrast on #fcfcfb: green 4.8:1, red 6.4:1.
+   Direction always carried by ▲/▼ or sign in the text, never color alone. */
+.delta-good { color: #008300; }
+.delta-bad  { color: #b3261e; }
+
+.card-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 0.75rem 0;
+    font-size: 0.88rem;
+    color: #52514e;
+}
+
+.card-controls label {
+    margin-right: 0.9rem;
+    cursor: pointer;
+}
+
+.card-controls input[type="radio"] {
+    accent-color: #2a78d6;
+    margin-right: 0.3rem;
+}
+
+.card-controls .dash-dropdown {
+    min-width: 240px;
+}
+
+.chart-note {
+    color: #52514e;
+    font-size: 0.88rem;
+    margin: 0.25rem 0.5rem 0.5rem;
+    max-width: 80ch;
+}
+
+.data-table {
+    margin: 0.25rem 0.5rem 0.5rem;
+    font-size: 0.85rem;
+}
+
+.data-table summary {
+    color: #898781;
+    cursor: pointer;
+}
+
+.table-scroll {
+    max-height: 320px;
+    overflow: auto;
+    margin-top: 0.5rem;
+}
+
+.data-table table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.data-table th,
+.data-table td {
+    text-align: left;
+    padding: 0.25rem 0.75rem 0.25rem 0;
+    border-bottom: 1px solid #e1e0d9;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.data-table th {
+    color: #52514e;
+    position: sticky;
+    top: 0;
+    background: #fcfcfb;
+}
+
+.footer {
+    text-align: center;
+    color: #898781;
+    font-size: 0.8rem;
+    padding: 1rem 1.5rem 2rem;
+}

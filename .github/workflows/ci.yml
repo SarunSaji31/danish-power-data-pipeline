@@ -49,4 +49,11 @@ jobs:
             docker stop dagster_daemon && docker rm dagster_daemon
             docker run -d --name dagster_daemon --network energy_v2 --restart always \
               --memory=900m --env-file /opt/energy-etl/dagster.env energy-etl-dagster:prod
+            cd /opt/energy-etl/src/dashboard
+            docker build -t energy-etl-dash:prod .
+            docker rm -f energy-etl-dash 2>/dev/null || true
+            docker run -d --name energy-etl-dash --network energy_v2 --restart always \
+              --memory=512m --env-file /opt/energy-etl/dashboard.env energy-etl-dash:prod
+            docker network connect my_portfolio_default energy-etl-dash
+            docker exec nginx_proxy nginx -s reload
           '

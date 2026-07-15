@@ -36,6 +36,29 @@ FROM private_consumption
 GROUP BY 1, 2
 WITH NO DATA;
 
+-- 4. Hourly price summary per zone (dashboard: hour-of-day heatmap,
+--    negative-price-hour counts). Also normalizes the 15-min grain post-2025-10.
+CREATE MATERIALIZED VIEW IF NOT EXISTS prices_hourly
+WITH (timescaledb.continuous) AS
+SELECT time_bucket('1 hour', ts) AS hour,
+       price_area,
+       avg(price_dkk_kwh) AS avg_price,
+       avg(spot_price_dkk_mwh) AS avg_spot_mwh
+FROM spot_prices
+GROUP BY 1, 2
+WITH NO DATA;
+
+-- 5. Daily consumption per heating category (dashboard: heat-pump vs other;
+--    the municipality cagg collapses this dimension away)
+CREATE MATERIALIZED VIEW IF NOT EXISTS consumption_daily_heating
+WITH (timescaledb.continuous) AS
+SELECT time_bucket('1 day', ts) AS day,
+       heating_category,
+       sum(consumption_kwh) AS consumption_kwh
+FROM private_consumption
+GROUP BY 1, 2
+WITH NO DATA;
+
 -- Keep the aggregates fresh automatically: every hour, re-materialize the
 -- window [3 days ago, 1 hour ago] — covers late-arriving upserts.
 SELECT add_continuous_aggregate_policy('prices_daily',
@@ -45,6 +68,12 @@ SELECT add_continuous_aggregate_policy('co2_daily',
     start_offset => INTERVAL '3 days', end_offset => INTERVAL '1 hour',
     schedule_interval => INTERVAL '1 hour', if_not_exists => TRUE);
 SELECT add_continuous_aggregate_policy('consumption_daily_municipality',
+    start_offset => INTERVAL '10 days', end_offset => INTERVAL '1 hour',
+    schedule_interval => INTERVAL '1 hour', if_not_exists => TRUE);
+SELECT add_continuous_aggregate_policy('prices_hourly',
+    start_offset => INTERVAL '3 days', end_offset => INTERVAL '1 hour',
+    schedule_interval => INTERVAL '1 hour', if_not_exists => TRUE);
+SELECT add_continuous_aggregate_policy('consumption_daily_heating',
     start_offset => INTERVAL '10 days', end_offset => INTERVAL '1 hour',
     schedule_interval => INTERVAL '1 hour', if_not_exists => TRUE);
 
