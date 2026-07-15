@@ -51,6 +51,8 @@ def layout():
             chart_card(
                 map_figure(MAP_METRICS[0]),
                 map_dataframe(),
+                title="Household consumption by municipality",
+                subtitle="Trailing 12 months — toggle total vs per-resident",
                 note="Trailing 12 months. Total volume follows the big cities; "
                 "switch to per-resident and the picture inverts — rural "
                 "municipalities use more electricity per person (larger homes, "
@@ -62,12 +64,17 @@ def layout():
             chart_card(
                 top_municipalities_figure(),
                 queries.top_municipalities(),
+                title="Top 15 municipalities",
+                subtitle="Total household consumption, trailing 12 months",
                 note="Trailing 12 months, total volume — the big cities lead; "
                 "see the map above for the per-resident story.",
             ),
             chart_card(
                 municipality_trend_figure(101),
                 queries.municipality_monthly(101),
+                title=f"Monthly consumption — {municipality_name(101)}",
+                subtitle="Household electricity since 2021",
+                title_id="muni-title",
                 note="Monthly household consumption for the selected "
                 "municipality since 2021 — winter peaks show how strongly "
                 "heating drives demand.",
@@ -83,6 +90,8 @@ def layout():
             chart_card(
                 heating_figure(),
                 queries.monthly_consumption_by_heating(),
+                title="Monthly consumption by heating type",
+                subtitle="All of Denmark, electric heating vs everything else",
                 note="Winter peaks are far steeper for electrically heated homes "
                 "— electric heating and heat pumps are what couple Danish "
                 "household demand to cold weather. The Aug–Sep 2021 dip is a "
@@ -99,10 +108,11 @@ def update_map(metric):
 
 
 @callback(Output("muni-graph", "figure"), Output("muni-table", "children"),
-          Input("muni-select", "value"))
+          Output("muni-title", "children"), Input("muni-select", "value"))
 def update_municipality(code):
     return (municipality_trend_figure(code),
-            data_table(queries.municipality_monthly(code)))
+            data_table(queries.municipality_monthly(code)),
+            f"Monthly consumption — {municipality_name(code)}")
 
 
 def map_dataframe():
@@ -135,11 +145,9 @@ def map_figure(metric: str):
     fig.update_geos(fitbounds="locations", visible=False, bgcolor=SURFACE)
     fig.update_layout(
         base_layout(
-            title=f"Household consumption by municipality — {metric}, "
-            "last 12 months",
             height=560,
             hovermode="closest",
-            margin=dict(l=8, r=8, t=56, b=8),
+            margin=dict(l=8, r=8, t=8, b=8),
         )
     )
     return fig
@@ -155,7 +163,6 @@ def municipality_trend_figure(code: int):
     )
     fig.update_layout(
         base_layout(
-            title=f"Monthly consumption — {municipality_name(code)}",
             yaxis_title="GWh",
             height=360,
             showlegend=False,
@@ -176,7 +183,6 @@ def top_municipalities_figure():
     )
     fig.update_layout(
         base_layout(
-            title="Top 15 municipalities, last 12 months",
             xaxis_title="GWh",
             height=460,
             hovermode="closest",
@@ -199,7 +205,6 @@ def heating_figure():
         )
     fig.update_layout(
         base_layout(
-            title="Monthly consumption by heating type, all of Denmark",
             yaxis_title="GWh",
             height=400,
         )

@@ -27,6 +27,8 @@ def layout():
             chart_card(
                 day_ahead_figure(),
                 queries.latest_day_ahead(),
+                title=f"Latest day-ahead prices — {latest_day_label()}",
+                subtitle="Hourly consumer price, Danish time",
                 note="The newest day-ahead auction result in the data — the "
                 "hourly prices consumers face on that day. Published ~13:00 "
                 "CET the day before delivery.",
@@ -34,6 +36,8 @@ def layout():
             chart_card(
                 daily_trend_figure("All"),
                 queries.daily_prices(),
+                title="Daily average price",
+                subtitle="7-day rolling average per bidding zone",
                 note="The 2022 spike is the European energy crisis; prices have "
                 "since fallen back but stay more volatile than pre-crisis.",
                 controls=dcc.RadioItems(TREND_RANGES, "All", id="trend-range",
@@ -43,6 +47,8 @@ def layout():
             chart_card(
                 heatmap_figure(),
                 queries.price_heatmap_dk1(),
+                title="DK1 price by hour of day",
+                subtitle="Monthly averages, Danish time",
                 note="Each column is a month, each row an hour of the day "
                 "(Danish time). The dark evening band at 17–20h is the daily "
                 "demand peak; cheap midday hours appear as solar grows.",
@@ -56,10 +62,14 @@ def update_trend(range_name):
     return daily_trend_figure(range_name)
 
 
-def day_ahead_figure():
+def latest_day_label() -> str:
     df = queries.latest_day_ahead()
     local = df["hour"].dt.tz_convert("Europe/Copenhagen")
-    day_label = local.iloc[0].strftime("%A %-d %B")
+    return local.iloc[0].strftime("%A %-d %B")
+
+
+def day_ahead_figure():
+    df = queries.latest_day_ahead()
     fig = go.Figure()
     for area, color in AREA_COLORS.items():
         sub = df[df["price_area"] == area]
@@ -72,7 +82,6 @@ def day_ahead_figure():
         )
     fig.update_layout(
         base_layout(
-            title=f"Latest day-ahead prices — {day_label}",
             yaxis_title="DKK/kWh incl. VAT",
             height=360,
         )
@@ -134,7 +143,6 @@ def daily_trend_figure(range_name: str):
         )
     fig.update_layout(
         base_layout(
-            title="Daily average price (7-day average)",
             yaxis_title="DKK/kWh incl. VAT",
             height=420,
         )
@@ -155,7 +163,6 @@ def heatmap_figure():
     )
     fig.update_layout(
         base_layout(
-            title="DK1 price by hour of day (Danish time)",
             yaxis_title="Hour of day",
             height=460,
             hovermode="closest",

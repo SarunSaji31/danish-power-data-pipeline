@@ -39,8 +39,9 @@ def base_layout(**overrides) -> dict:
         paper_bgcolor=SURFACE,
         plot_bgcolor=SURFACE,
         font=dict(family=FONT_FAMILY, color=INK_SECONDARY, size=13),
-        title_font=dict(color=INK_PRIMARY, size=16),
-        margin=dict(l=56, r=24, t=56, b=48),
+        # Chart titles live in the card header (components.chart_card), not in
+        # plotly — the top margin only has to fit one legend row.
+        margin=dict(l=56, r=24, t=40, b=48),
         hovermode="x unified",
         xaxis=dict(gridcolor=GRIDLINE, linecolor=AXIS_LINE, zeroline=False,
                    tickfont=dict(color=INK_MUTED)),

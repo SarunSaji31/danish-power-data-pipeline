@@ -1,16 +1,17 @@
-"""Wind & CO2 page: renewable forecasts and grid carbon intensity.
+"""Wind & CO2 page: renewable forecasts, production mix and grid carbon.
 
 Two stacked charts over the same timeline — never a dual-axis overlay —
 so the inverse wind/CO2 relationship reads without inventing a shared scale.
 """
 
 import dash
+import pandas as pd
 import plotly.graph_objects as go
 from dash import html
 
 import queries
 from components import chart_card
-from theme import AQUA, AREA_COLORS, BLUE, YELLOW, base_layout
+from theme import AQUA, AREA_COLORS, BLUE, SURFACE, YELLOW, base_layout
 
 dash.register_page(__name__, path="/wind-co2", name="Wind & CO₂", order=1)
 
@@ -34,12 +35,25 @@ def layout():
             chart_card(
                 production_figure(),
                 queries.daily_wind_solar(),
+                title="Forecast renewable production",
+                subtitle="7-day rolling average, stacked by source",
                 note="Daily average forecast output. Offshore capacity grows "
                 "visibly across the period; solar peaks every summer.",
             ),
             chart_card(
+                mix_figure(),
+                mix_dataframe(),
+                title="Renewable mix, last 12 months",
+                subtitle="Share of average forecast output",
+                note="Onshore wind still carries most of the Danish renewable "
+                "forecast; solar's slice is small on an annual average because "
+                "it produces nothing at night and little in winter.",
+            ),
+            chart_card(
                 co2_figure(),
                 queries.daily_co2(),
+                title="CO₂ intensity of consumption",
+                subtitle="7-day rolling average per bidding zone",
                 note="Grams of CO₂ per kWh consumed (5-min data averaged per "
                 "day). Compare valleys here with wind peaks above.",
             ),
@@ -61,9 +75,46 @@ def production_figure():
         )
     fig.update_layout(
         base_layout(
-            title="Forecast renewable production (7-day average)",
             yaxis_title="MW",
             height=400,
+        )
+    )
+    return fig
+
+
+def mix_dataframe() -> pd.DataFrame:
+    """Average forecast MW per source over the trailing 12 months."""
+    df = queries.daily_wind_solar()
+    last12 = df[df["day"] >= df["day"].max() - pd.DateOffset(months=12)]
+    rows = [(label, last12[column].mean()) for column, label, _ in SOURCES]
+    out = pd.DataFrame(rows, columns=["source", "avg_mw"])
+    out["share_pct"] = out["avg_mw"] / out["avg_mw"].sum() * 100
+    return out
+
+
+def mix_figure():
+    df = mix_dataframe()
+    total = df["avg_mw"].sum()
+    fig = go.Figure(
+        go.Pie(
+            labels=df["source"], values=df["avg_mw"],
+            hole=0.62, sort=False, direction="clockwise",
+            marker=dict(colors=[color for _, _, color in SOURCES],
+                        line=dict(color=SURFACE, width=2)),
+            textinfo="label+percent", textposition="outside",
+            hovertemplate="%{label}: %{value:,.0f} MW avg (%{percent})"
+            "<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        base_layout(
+            height=380,
+            showlegend=False,
+            margin=dict(l=24, r=24, t=32, b=32),
+            annotations=[dict(
+                text=f"{total:,.0f} MW<br>avg forecast",
+                showarrow=False, font=dict(size=14),
+            )],
         )
     )
     return fig
@@ -83,7 +134,6 @@ def co2_figure():
         )
     fig.update_layout(
         base_layout(
-            title="CO₂ intensity of consumption (7-day average)",
             yaxis_title="g CO₂/kWh",
             height=400,
         )

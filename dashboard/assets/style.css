@@ -97,6 +97,23 @@ main h2 {
 .delta-good { color: #008300; }
 .delta-bad  { color: #b3261e; }
 
+.card-head {
+    padding: 0.45rem 0.55rem 0.15rem;
+}
+
+.card-head h3 {
+    margin: 0;
+    font-size: 1.02rem;
+    font-weight: 600;
+    color: #0b0b0b;
+}
+
+.card-sub {
+    margin: 0.15rem 0 0;
+    color: #898781;
+    font-size: 0.85rem;
+}
+
 .card-controls {
     display: flex;
     align-items: center;

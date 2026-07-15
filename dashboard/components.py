@@ -49,14 +49,25 @@ def kpi_row(tiles: list[html.Div]) -> html.Div:
 
 def chart_card(figure, df: pd.DataFrame, note: str | None = None,
                controls=None, graph_id: str | None = None,
-               table_id: str | None = None) -> html.Div:
+               table_id: str | None = None, title: str | None = None,
+               subtitle: str | None = None,
+               title_id: str | None = None) -> html.Div:
     """A chart, an optional caption, and its table twin, on one card.
     controls/graph_id/table_id make the card callback-targetable while the
-    table twin stays in sync with what the chart shows."""
-    graph_kwargs = {"figure": figure, "config": {"displaylogo": False}}
+    table twin stays in sync with what the chart shows.
+    title/subtitle render as an HTML card header (figures carry no plotly
+    title, so the legend never collides with it); title_id makes the header
+    callback-updatable."""
+    graph_kwargs = {"figure": figure,
+                    "config": {"displayModeBar": False}}
     if graph_id:
         graph_kwargs["id"] = graph_id
     children = []
+    if title:
+        head = [html.H3(title, id=title_id) if title_id else html.H3(title)]
+        if subtitle:
+            head.append(html.P(subtitle, className="card-sub"))
+        children.append(html.Div(head, className="card-head"))
     if controls is not None:
         children.append(html.Div(controls, className="card-controls"))
     children.append(dcc.Graph(**graph_kwargs))

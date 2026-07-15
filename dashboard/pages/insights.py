@@ -25,6 +25,9 @@ def layout():
             chart_card(
                 wind_vs_price_figure(),
                 queries.wind_vs_price_dk1(),
+                title=f"Forecast wind vs daily average price, DK1 "
+                f"(r = {wind_price_correlation():.2f})",
+                subtitle="One dot per day since 2021",
                 note="Each dot is one day in DK1 since 2021. The fit line slopes "
                 "down: more forecast wind, lower day-ahead price (merit-order "
                 "effect).",
@@ -32,6 +35,8 @@ def layout():
             chart_card(
                 duration_curve_figure(),
                 queries.duration_curve(),
+                title="Price duration curve",
+                subtitle="Last 12 months, hours sorted most → least expensive",
                 note="Every hour of the last 12 months sorted from most to "
                 "least expensive — the classic market view of how extreme the "
                 "extremes are. The tail dipping below zero is the hours when "
@@ -40,6 +45,8 @@ def layout():
             chart_card(
                 hourly_profile_figure(),
                 queries.hourly_profile_by_year(),
+                title="DK1 average price by hour of day, per year",
+                subtitle="Danish time — darker line = more recent year",
                 note="Average DK1 price per hour of the day, one line per year "
                 "(darker = more recent). The midday dip deepens as solar "
                 "capacity grows while the 17–20h evening peak persists — the "
@@ -48,6 +55,8 @@ def layout():
             chart_card(
                 negative_hours_figure(),
                 queries.negative_price_hours(),
+                title="Negative-price hours per month",
+                subtitle="Hours below 0 DKK/MWh spot, per bidding zone",
                 note="Hours where the market price itself went below zero — "
                 "producers paying consumers to take power. Rare before 2023, "
                 "now routine in windy months.",
@@ -56,11 +65,15 @@ def layout():
     )
 
 
+def wind_price_correlation() -> float:
+    df = queries.wind_vs_price_dk1().dropna()
+    return np.corrcoef(df["wind_mw"], df["avg_price"])[0, 1]
+
+
 def wind_vs_price_figure():
     df = queries.wind_vs_price_dk1().dropna()
     slope, intercept = np.polyfit(df["wind_mw"], df["avg_price"], 1)
     x_fit = np.array([df["wind_mw"].min(), df["wind_mw"].max()])
-    r = np.corrcoef(df["wind_mw"], df["avg_price"])[0, 1]
 
     fig = go.Figure()
     fig.add_trace(
@@ -81,7 +94,6 @@ def wind_vs_price_figure():
     )
     fig.update_layout(
         base_layout(
-            title=f"Forecast wind vs daily average price, DK1 (r = {r:.2f})",
             xaxis_title="Forecast wind (MW, daily avg)",
             yaxis_title="DKK/kWh incl. VAT",
             height=460,
@@ -108,7 +120,6 @@ def duration_curve_figure():
     fig.add_hline(y=0, line_color=AXIS_LINE, line_width=1)
     fig.update_layout(
         base_layout(
-            title="Price duration curve, last 12 months",
             xaxis_title="% of hours",
             yaxis_title="DKK/kWh incl. VAT",
             height=420,
@@ -136,7 +147,6 @@ def hourly_profile_figure():
         )
     fig.update_layout(
         base_layout(
-            title="DK1 average price by hour of day, per year (Danish time)",
             xaxis_title="Hour of day",
             yaxis_title="DKK/kWh incl. VAT",
             height=420,
@@ -159,7 +169,6 @@ def negative_hours_figure():
         )
     fig.update_layout(
         base_layout(
-            title="Negative-price hours per month",
             yaxis_title="Hours",
             height=400,
             barmode="group",
