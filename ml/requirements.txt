@@ -1,7 +1,9 @@
 # ML phase only — NOT dashboard or pipeline runtime deps.
-# Installed into the repo .venv for local training/backtesting.
-lightgbm==4.6.0
-scikit-learn==1.7.2
-pandas>=3.0
-psycopg2-binary
-python-dotenv
+# Installed into the repo .venv for local training/backtesting:
+#   pip install -r ml/requirements.txt
+# (the production asset gets lightgbm+pandas via energy_etl/pyproject.toml instead)
+lightgbm==4.6.0        # the model: gradient-boosted trees, CPU-only
+scikit-learn==1.7.2    # linear-regression sanity check in backtest.py only
+pandas==3.0.3          # >=3.0 REQUIRED: pandas 2.x segfaults on py3.14 + tz-aware ts
+psycopg2-binary==2.9.12
+python-dotenv==1.1.1   # loads DB creds from energy_etl/.env
