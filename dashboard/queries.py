@@ -84,16 +84,18 @@ def negative_price_hours():
 
 
 def latest_day_ahead():
-    """Hourly prices for the newest full Copenhagen day in the data —
-    the day-ahead curve consumers actually face."""
+    """Prices for the newest Copenhagen day, at native market resolution
+    (15-min since 2025-10, hourly before) — read RAW, not the hourly cagg,
+    so the curve shows the real quarter-hour steps consumers face."""
     return query_df(
         "WITH latest AS ("
-        "    SELECT date_trunc('day', max(hour) AT TIME ZONE 'Europe/Copenhagen') AS d"
-        "    FROM prices_hourly"
+        "    SELECT date_trunc('day', max(ts) AT TIME ZONE 'Europe/Copenhagen') AS d"
+        "    FROM spot_prices"
         ") "
-        "SELECT hour, price_area, avg_price FROM prices_hourly, latest "
-        "WHERE date_trunc('day', hour AT TIME ZONE 'Europe/Copenhagen') = latest.d "
-        "ORDER BY hour, price_area"
+        "SELECT ts, price_area, price_dkk_kwh AS price FROM spot_prices, latest "
+        "WHERE ts >= latest.d AT TIME ZONE 'Europe/Copenhagen' "
+        "  AND ts < (latest.d + INTERVAL '1 day') AT TIME ZONE 'Europe/Copenhagen' "
+        "ORDER BY ts, price_area"
     )
 
 

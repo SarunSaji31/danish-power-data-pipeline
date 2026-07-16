@@ -28,10 +28,10 @@ def layout():
                 day_ahead_figure(),
                 queries.latest_day_ahead(),
                 title=f"Latest day-ahead prices — {latest_day_label()}",
-                subtitle="Hourly consumer price, Danish time",
-                note="The newest day-ahead auction result in the data — the "
-                "hourly prices consumers face on that day. Published ~13:00 "
-                "CET the day before delivery.",
+                subtitle="Consumer price at market resolution (15 min), Danish time",
+                note="The newest day-ahead auction result in the data, at the "
+                "market's native 15-minute resolution — the prices consumers "
+                "face on that day. Published ~13:00 CET the day before delivery.",
             ),
             chart_card(
                 daily_trend_figure("All"),
@@ -64,7 +64,7 @@ def update_trend(range_name):
 
 def latest_day_label() -> str:
     df = queries.latest_day_ahead()
-    local = df["hour"].dt.tz_convert("Europe/Copenhagen")
+    local = df["ts"].dt.tz_convert("Europe/Copenhagen")
     return local.iloc[0].strftime("%A %-d %B")
 
 
@@ -76,11 +76,12 @@ def day_ahead_figure():
     widths = {"DK1": 5, "DK2": 2}
     for area, color in AREA_COLORS.items():
         sub = df[df["price_area"] == area]
-        x = sub["hour"].dt.tz_convert("Europe/Copenhagen").tolist()
-        y = sub["avg_price"].tolist()
+        x = sub["ts"].dt.tz_convert("Europe/Copenhagen").tolist()
+        y = sub["price"].tolist()
         # hv steps only draw a ledge up to the NEXT point — repeat the last
-        # price at midnight so hour 23 gets its full step
-        x.append(x[-1] + pd.Timedelta(hours=1))
+        # price one grain later (15 min / 1 h) so the final step reaches midnight
+        grain = x[-1] - x[-2] if len(x) > 1 else pd.Timedelta(hours=1)
+        x.append(x[-1] + grain)
         y.append(y[-1])
         fig.add_trace(
             go.Scatter(
@@ -94,7 +95,9 @@ def day_ahead_figure():
             height=360,
         )
     )
-    fig.update_xaxes(tickformat="%H:%M", hoverformat="%H:%M")
+    # one labeled tick per hour, like consumer price apps (dtick in ms)
+    fig.update_xaxes(tickformat="%H:%M", hoverformat="%H:%M",
+                     dtick=3_600_000, tickfont=dict(size=11))
     fig.update_yaxes(hoverformat=".2f")
     return fig
 
