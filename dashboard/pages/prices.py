@@ -130,17 +130,22 @@ def forecast_figure():
         fig.add_annotation(text="No predictions yet — the model runs each morning at 08:15",
                            showarrow=False, font=dict(size=13, color=INK_SECONDARY))
     else:
-        x = df["ts"].dt.tz_convert("Europe/Copenhagen")
-        fig.add_trace(go.Scatter(
-            x=x, y=df["actual_price"], name="Actual (auction result)",
-            mode="lines", line=dict(color=BLUE, width=2, shape="hv"),
-        ))
-        # the prediction is a model artifact, not a market entity: dashed gray
-        # keeps the zone palette untouched and the dash is a non-color cue
-        fig.add_trace(go.Scatter(
-            x=x, y=df["predicted_price"], name="Model forecast",
-            mode="lines", line=dict(color=INK_SECONDARY, width=2, shape="hv", dash="dash"),
-        ))
+        x = df["ts"].dt.tz_convert("Europe/Copenhagen").tolist()
+        # hv steps only draw a ledge up to the NEXT point — repeat the last
+        # value one hour later so the 23:00 step reaches midnight (same trick
+        # as the day-ahead chart)
+        x.append(x[-1] + pd.Timedelta(hours=1))
+        for column, name, line in [
+            ("actual_price", "Actual (auction result)",
+             dict(color=BLUE, width=2, shape="hv")),
+            # the prediction is a model artifact, not a market entity: dashed
+            # gray keeps the zone palette untouched, dash is a non-color cue
+            ("predicted_price", "Model forecast",
+             dict(color=INK_SECONDARY, width=2, shape="hv", dash="dash")),
+        ]:
+            y = df[column].tolist()
+            fig.add_trace(go.Scatter(x=x, y=y + [y[-1]], name=name,
+                                     mode="lines", line=line))
     fig.update_layout(base_layout(yaxis_title="DKK/kWh incl. VAT", height=360))
     fig.update_xaxes(hoverformat="%a %-d %b, %H:%M")
     fig.update_yaxes(hoverformat=".2f")
