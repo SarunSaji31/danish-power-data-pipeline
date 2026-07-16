@@ -71,6 +71,9 @@ def latest_day_label() -> str:
 def day_ahead_figure():
     df = queries.latest_day_ahead()
     fig = go.Figure()
+    # DK1/DK2 prices are often identical and the lines coincide: draw DK1 as
+    # a wider band underneath, DK2 thinner on top, so both stay visible
+    widths = {"DK1": 5, "DK2": 2}
     for area, color in AREA_COLORS.items():
         sub = df[df["price_area"] == area]
         x = sub["hour"].dt.tz_convert("Europe/Copenhagen").tolist()
@@ -82,7 +85,7 @@ def day_ahead_figure():
         fig.add_trace(
             go.Scatter(
                 x=x, y=y, name=area,
-                mode="lines", line=dict(color=color, width=2, shape="hv"),
+                mode="lines", line=dict(color=color, width=widths[area], shape="hv"),
             )
         )
     fig.update_layout(

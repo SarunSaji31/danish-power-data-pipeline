@@ -48,6 +48,12 @@ FROM spot_prices
 GROUP BY 1, 2
 WITH NO DATA;
 
+-- Real-time aggregate: day-ahead prices are FUTURE-dated, and a
+-- materialized-only cagg (the 2.13+ default) only shows them after the
+-- refresh policy catches up — the dashboard's latest-day chart would grow
+-- one hour at a time. Real-time unions in raw rows past the watermark.
+ALTER MATERIALIZED VIEW prices_hourly SET (timescaledb.materialized_only = false);
+
 -- 5. Daily consumption per heating category (dashboard: heat-pump vs other;
 --    the municipality cagg collapses this dimension away)
 CREATE MATERIALIZED VIEW IF NOT EXISTS consumption_daily_heating
