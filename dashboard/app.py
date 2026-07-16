@@ -1,9 +1,11 @@
 """Dash entry point — nav shell + page router.
 
 Pages register themselves from dashboard/pages/ (Dash Pages). Run locally:
-    python app.py            -> http://127.0.0.1:8050
+    python app.py [port]     -> http://127.0.0.1:8050
 In production gunicorn serves `server` (the underlying Flask app).
 """
+
+import sys
 
 import dash
 from dash import Dash, dcc, html
@@ -35,4 +37,5 @@ app.layout = html.Div(
 )
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # no debug=True: Dash dev tools crash on Python 3.14 (pkgutil.find_loader removed)
+    app.run(port=int(sys.argv[1]) if len(sys.argv) > 1 else 8050)

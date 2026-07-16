@@ -126,6 +126,7 @@ def duration_curve_figure():
             hovermode="closest",
         )
     )
+    fig.update_xaxes(ticksuffix="%")
     return fig
 
 
@@ -153,6 +154,7 @@ def hourly_profile_figure():
         )
     )
     fig.update_xaxes(dtick=4)
+    fig.update_yaxes(hoverformat=".2f")
     return fig
 
 
@@ -175,4 +177,6 @@ def negative_hours_figure():
             bargap=0.25,
         )
     )
+    fig.update_xaxes(hoverformat="%b %Y")
+    fig.update_yaxes(hoverformat=".0f")
     return fig

@@ -79,6 +79,8 @@ def production_figure():
             height=400,
         )
     )
+    fig.update_xaxes(hoverformat="%-d %b %Y")
+    fig.update_yaxes(hoverformat=",.0f")
     return fig
 
 
@@ -138,4 +140,6 @@ def co2_figure():
             height=400,
         )
     )
+    fig.update_xaxes(hoverformat="%-d %b %Y")
+    fig.update_yaxes(hoverformat=".0f")
     return fig

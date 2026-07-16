@@ -168,6 +168,8 @@ def municipality_trend_figure(code: int):
             showlegend=False,
         )
     )
+    fig.update_xaxes(hoverformat="%b %Y")
+    fig.update_yaxes(hoverformat=".1f")
     return fig
 
 
@@ -209,4 +211,6 @@ def heating_figure():
             height=400,
         )
     )
+    fig.update_xaxes(hoverformat="%b %Y")
+    fig.update_yaxes(hoverformat=".1f")
     return fig

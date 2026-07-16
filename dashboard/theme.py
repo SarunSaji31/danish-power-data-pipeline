@@ -43,6 +43,8 @@ def base_layout(**overrides) -> dict:
         # plotly — the top margin only has to fit one legend row.
         margin=dict(l=56, r=24, t=40, b=48),
         hovermode="x unified",
+        hoverlabel=dict(bgcolor=SURFACE, bordercolor=AXIS_LINE,
+                        font=dict(family=FONT_FAMILY, size=12, color=INK_PRIMARY)),
         xaxis=dict(gridcolor=GRIDLINE, linecolor=AXIS_LINE, zeroline=False,
                    tickfont=dict(color=INK_MUTED)),
         yaxis=dict(gridcolor=GRIDLINE, linecolor=AXIS_LINE, zeroline=False,

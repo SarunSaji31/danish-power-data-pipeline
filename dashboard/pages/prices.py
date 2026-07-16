@@ -73,10 +73,15 @@ def day_ahead_figure():
     fig = go.Figure()
     for area, color in AREA_COLORS.items():
         sub = df[df["price_area"] == area]
+        x = sub["hour"].dt.tz_convert("Europe/Copenhagen").tolist()
+        y = sub["avg_price"].tolist()
+        # hv steps only draw a ledge up to the NEXT point — repeat the last
+        # price at midnight so hour 23 gets its full step
+        x.append(x[-1] + pd.Timedelta(hours=1))
+        y.append(y[-1])
         fig.add_trace(
             go.Scatter(
-                x=sub["hour"].dt.tz_convert("Europe/Copenhagen"),
-                y=sub["avg_price"], name=area,
+                x=x, y=y, name=area,
                 mode="lines", line=dict(color=color, width=2, shape="hv"),
             )
         )
@@ -86,7 +91,8 @@ def day_ahead_figure():
             height=360,
         )
     )
-    fig.update_xaxes(tickformat="%H:%M")
+    fig.update_xaxes(tickformat="%H:%M", hoverformat="%H:%M")
+    fig.update_yaxes(hoverformat=".2f")
     return fig
 
 
@@ -147,6 +153,8 @@ def daily_trend_figure(range_name: str):
             height=420,
         )
     )
+    fig.update_xaxes(hoverformat="%-d %b %Y")
+    fig.update_yaxes(hoverformat=".2f")
     return fig
 
 
