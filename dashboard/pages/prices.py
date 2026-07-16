@@ -39,9 +39,10 @@ def layout():
                 title="Price model: forecast vs actual — DK1",
                 subtitle=forecast_subtitle(),
                 note="Each morning at 08:15 a LightGBM model predicts tomorrow's "
-                "24 hourly prices from price history and that morning's weather "
-                "forecast — before the 12:00 auction, hours ahead of the official "
-                "result (~13:00). Predictions are stored immutably and scored "
+                "24 hourly DK1 prices (the western bidding zone) from price "
+                "history and that morning's weather forecast — before the 12:00 "
+                "auction, hours ahead of the official result (~13:00). "
+                "Predictions are stored immutably and scored "
                 "against the auction outcome once it lands. Walk-forward backtest "
                 "over 24 months: MAE 0.21 DKK/kWh vs 0.29 for a naive "
                 "tomorrow-equals-today forecast.",
@@ -136,11 +137,11 @@ def forecast_figure():
         # as the day-ahead chart)
         x.append(x[-1] + pd.Timedelta(hours=1))
         for column, name, line in [
-            ("actual_price", "Actual (auction result)",
+            ("actual_price", "DK1 actual (auction result)",
              dict(color=BLUE, width=2, shape="hv")),
             # the prediction is a model artifact, not a market entity: dashed
             # gray keeps the zone palette untouched, dash is a non-color cue
-            ("predicted_price", "Model forecast",
+            ("predicted_price", "DK1 model forecast",
              dict(color=INK_SECONDARY, width=2, shape="hv", dash="dash")),
         ]:
             y = df[column].tolist()
