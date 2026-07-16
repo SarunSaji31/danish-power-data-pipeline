@@ -99,6 +99,31 @@ def latest_day_ahead():
     )
 
 
+def forecast_vs_actual(days: int = 14):
+    """Model-predicted vs realized hourly DK1 price, trailing N days (the
+    newest predictions cover tomorrow, so the predicted line runs ahead of
+    the actual one until the auction result lands)."""
+    return query_df(
+        "SELECT p.ts, p.predicted_price, h.avg_price AS actual_price "
+        "FROM price_predictions p "
+        "LEFT JOIN prices_hourly h ON h.hour = p.ts AND h.price_area = 'DK1' "
+        "WHERE p.ts >= now() - make_interval(days => %s) "
+        "ORDER BY p.ts",
+        (days,),
+    )
+
+
+def forecast_mae_30d():
+    """Rolling 30-day MAE of the price model — live monitoring headline."""
+    return query_df(
+        "SELECT round(avg(abs(p.predicted_price - h.avg_price))::numeric, 3) AS mae, "
+        "       count(*) AS hours "
+        "FROM price_predictions p "
+        "JOIN prices_hourly h ON h.hour = p.ts AND h.price_area = 'DK1' "
+        "WHERE p.ts >= now() - interval '30 days'"
+    )
+
+
 def duration_curve(months: int = 12):
     """Hourly prices sorted high->low per zone (classic energy-market chart:
     how many hours of the year are expensive/cheap/negative)."""

@@ -49,3 +49,32 @@ CREATE TABLE IF NOT EXISTS private_consumption (
 );
 SELECT create_hypertable('private_consumption', 'ts',
     chunk_time_interval => interval '1 month', if_not_exists => TRUE);
+
+-- 5. Weather forecasts at fixed DK points, hourly (Open-Meteo, ML feature source)
+-- Point-in-time forecasts: backfill from the historical-forecast archive,
+-- daily rows from the live forecast API. Wind is at 100m hub height, in m/s
+-- (the API default is km/h — the ingest requests wind_speed_unit=ms).
+CREATE TABLE IF NOT EXISTS weather_forecasts (
+    ts                       timestamptz NOT NULL,
+    location                 text        NOT NULL,
+    wind_speed_100m_ms       double precision,
+    shortwave_radiation_wm2  double precision,
+    temperature_2m_c         double precision,
+    created_at               timestamptz DEFAULT now(),
+    PRIMARY KEY (ts, location)
+);
+SELECT create_hypertable('weather_forecasts', 'ts',
+    chunk_time_interval => interval '1 month', if_not_exists => TRUE);
+
+-- 6. Model predictions of DK1 day-ahead prices (written each morning BEFORE the
+-- 12:00 auction; actuals publish ~13:00). Rows are receipts: never re-predicted,
+-- keyed by model_version so every prediction traces to the exact model file.
+CREATE TABLE IF NOT EXISTS price_predictions (
+    ts               timestamptz NOT NULL,   -- the hour being predicted
+    predicted_price  double precision,       -- DK1 kr/kWh incl VAT (same unit as spot_prices.price_dkk_kwh)
+    model_version    text        NOT NULL,   -- e.g. '2026-07' -> ml model file
+    predicted_at     timestamptz DEFAULT now(),
+    PRIMARY KEY (ts, model_version)
+);
+SELECT create_hypertable('price_predictions', 'ts',
+    chunk_time_interval => interval '1 month', if_not_exists => TRUE);

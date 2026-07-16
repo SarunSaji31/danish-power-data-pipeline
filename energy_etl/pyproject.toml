@@ -9,6 +9,8 @@ dependencies = [
     "dagster-postgres",
     "psycopg2-binary",
     "requests",
+    "lightgbm",   # price_forecast asset (model inference)
+    "pandas",     # feature frame for prediction
 ]
 
 [project.optional-dependencies]

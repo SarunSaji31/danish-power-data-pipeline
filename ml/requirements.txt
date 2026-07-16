@@ -1,0 +1,7 @@
+# ML phase only — NOT dashboard or pipeline runtime deps.
+# Installed into the repo .venv for local training/backtesting.
+lightgbm==4.6.0
+scikit-learn==1.7.2
+pandas>=3.0
+psycopg2-binary
+python-dotenv

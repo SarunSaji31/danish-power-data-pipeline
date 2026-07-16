@@ -7,7 +7,7 @@ from dash import Input, Output, callback, dcc, html
 
 import queries
 from components import chart_card, kpi_row, stat_tile
-from theme import AREA_COLORS, SEQUENTIAL_BLUES, base_layout
+from theme import AREA_COLORS, BLUE, INK_SECONDARY, SEQUENTIAL_BLUES, base_layout
 
 dash.register_page(__name__, path="/", name="Prices", order=0)
 
@@ -32,6 +32,19 @@ def layout():
                 note="The newest day-ahead auction result in the data, at the "
                 "market's native 15-minute resolution — the prices consumers "
                 "face on that day. Published ~13:00 CET the day before delivery.",
+            ),
+            chart_card(
+                forecast_figure(),
+                queries.forecast_vs_actual(),
+                title="Price model: forecast vs actual — DK1",
+                subtitle=forecast_subtitle(),
+                note="Each morning at 08:15 a LightGBM model predicts tomorrow's "
+                "24 hourly prices from price history and that morning's weather "
+                "forecast — before the 12:00 auction, hours ahead of the official "
+                "result (~13:00). Predictions are stored immutably and scored "
+                "against the auction outcome once it lands. Walk-forward backtest "
+                "over 24 months: MAE 0.21 DKK/kWh vs 0.29 for a naive "
+                "tomorrow-equals-today forecast.",
             ),
             chart_card(
                 daily_trend_figure("All"),
@@ -98,6 +111,38 @@ def day_ahead_figure():
     # one labeled tick per hour, like consumer price apps (dtick in ms)
     fig.update_xaxes(tickformat="%H:%M", hoverformat="%H:%M",
                      dtick=3_600_000, tickfont=dict(size=11))
+    fig.update_yaxes(hoverformat=".2f")
+    return fig
+
+
+def forecast_subtitle() -> str:
+    score = queries.forecast_mae_30d().iloc[0]
+    if not score.hours:
+        return "Hourly, Danish time — collecting scored hours, MAE appears after the first auction result"
+    return (f"Hourly, Danish time — rolling 30-day MAE {score.mae:.3f} DKK/kWh "
+            f"over {int(score.hours)} scored hours")
+
+
+def forecast_figure():
+    df = queries.forecast_vs_actual()
+    fig = go.Figure()
+    if df.empty:
+        fig.add_annotation(text="No predictions yet — the model runs each morning at 08:15",
+                           showarrow=False, font=dict(size=13, color=INK_SECONDARY))
+    else:
+        x = df["ts"].dt.tz_convert("Europe/Copenhagen")
+        fig.add_trace(go.Scatter(
+            x=x, y=df["actual_price"], name="Actual (auction result)",
+            mode="lines", line=dict(color=BLUE, width=2, shape="hv"),
+        ))
+        # the prediction is a model artifact, not a market entity: dashed gray
+        # keeps the zone palette untouched and the dash is a non-color cue
+        fig.add_trace(go.Scatter(
+            x=x, y=df["predicted_price"], name="Model forecast",
+            mode="lines", line=dict(color=INK_SECONDARY, width=2, shape="hv", dash="dash"),
+        ))
+    fig.update_layout(base_layout(yaxis_title="DKK/kWh incl. VAT", height=360))
+    fig.update_xaxes(hoverformat="%a %-d %b, %H:%M")
     fig.update_yaxes(hoverformat=".2f")
     return fig
 

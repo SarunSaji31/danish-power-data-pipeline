@@ -5,11 +5,15 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import lightgbm as lgb
+import pandas as pd
 import psycopg2
 import requests
 from psycopg2.extras import execute_values
 
 import dagster as dg
+
+from energy_etl import ml
 
 API_BASE = "https://api.energidataservice.dk/dataset"
 PRICE_AREAS = ["DK1", "DK2"]
@@ -208,9 +212,130 @@ def private_consumption(context: dg.AssetExecutionContext) -> dg.MaterializeResu
     return dg.MaterializeResult(metadata={"rows_upserted": len(rows)})
 
 
-# --- Telegram briefing -------------------------------------------------------
+# --- Weather forecasts (Open-Meteo, ML feature source) ------------------------
+
+OPEN_METEO_ARCHIVE = "https://historical-forecast-api.open-meteo.com/v1/forecast"
+OPEN_METEO_LIVE = "https://api.open-meteo.com/v1/forecast"
+
+# Fixed observation points: DK1 onshore belt, DK1 offshore (Horns Rev area), DK2.
+WEATHER_LOCATIONS = {
+    "jutland_west": (56.0, 8.4),
+    "north_sea": (55.7, 7.8),
+    "zealand": (55.6, 12.0),
+}
+WEATHER_VARS = "wind_speed_100m,shortwave_radiation,temperature_2m"
+
+# The historical-forecast archive lags ~2 days behind real time; anything newer
+# (including tomorrow, which the morning run needs) comes from the live API.
+ARCHIVE_LAG_DAYS = 2
+LIVE_HORIZON_DAYS = 2  # fetch through tomorrow; further out is noise we don't store
+
+
+def fetch_weather(base_url: str, lat: float, lon: float, start: datetime, end: datetime) -> list[tuple]:
+    """Hourly (ts, wind_ms, radiation_wm2, temp_c) rows for [start, end)."""
+    response = requests.get(
+        base_url,
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "start_date": start.strftime("%Y-%m-%d"),
+            # API end_date is a calendar date, INCLUSIVE (unlike EDS end-exclusive)
+            "end_date": (end - timedelta(seconds=1)).strftime("%Y-%m-%d"),
+            "hourly": WEATHER_VARS,
+            "wind_speed_unit": "ms",  # default is km/h
+            "timezone": "UTC",
+        },
+        timeout=120,
+    )
+    response.raise_for_status()
+    hourly = response.json()["hourly"]
+    rows = []
+    for i, time_string in enumerate(hourly["time"]):
+        ts = parse_utc(time_string)
+        wind = hourly["wind_speed_100m"][i]
+        # date-granular request can return hours outside [start, end); nulls appear
+        # beyond the archive/forecast horizon — skip both
+        if ts < start or ts >= end or wind is None:
+            continue
+        rows.append((ts, wind, hourly["shortwave_radiation"][i], hourly["temperature_2m"][i]))
+    return rows
+
+
+@dg.asset(partitions_def=MONTHLY, backfill_policy=dg.BackfillPolicy.single_run())
+def weather_forecasts(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
+    """Point-in-time weather forecasts at 3 fixed DK points (Open-Meteo).
+    Leak-free ML features: available every morning BEFORE the 12:00 day-ahead
+    auction, unlike production_forecasts (EDS publishes those in the evening)."""
+    window = context.partition_time_window
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    archive_end = today - timedelta(days=ARCHIVE_LAG_DAYS)
+    live_end = today + timedelta(days=LIVE_HORIZON_DAYS)
+
+    rows: list[tuple] = []
+    for location, (lat, lon) in WEATHER_LOCATIONS.items():
+        if window.start < archive_end:
+            for ts, wind, rad, temp in fetch_weather(
+                OPEN_METEO_ARCHIVE, lat, lon, window.start, min(window.end, archive_end)
+            ):
+                rows.append((ts, location, wind, rad, temp))
+        if window.end > archive_end and max(window.start, archive_end) < live_end:
+            for ts, wind, rad, temp in fetch_weather(
+                OPEN_METEO_LIVE, lat, lon, max(window.start, archive_end), min(window.end, live_end)
+            ):
+                rows.append((ts, location, wind, rad, temp))
+    context.log.info(f"Fetched {len(rows)} weather rows for {context.partition_key_range}")
+
+    upsert(
+        "weather_forecasts",
+        ["ts", "location", "wind_speed_100m_ms", "shortwave_radiation_wm2", "temperature_2m_c"],
+        rows,
+        ["ts", "location"],
+    )
+    return dg.MaterializeResult(metadata={"rows_upserted": len(rows)})
+
+
+# --- Price forecast (ML model) ------------------------------------------------
 
 COPENHAGEN = ZoneInfo("Europe/Copenhagen")
+
+
+@dg.asset(deps=[spot_prices, weather_forecasts])
+def price_forecast(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
+    """Predict tomorrow's 24 hourly DK1 prices BEFORE the 12:00 day-ahead auction
+    (actuals publish ~13:00 — a later prediction would be worthless). Features are
+    leak-free by construction: price lags + this morning's weather forecast."""
+    tomorrow_start = datetime.combine(
+        (datetime.now(COPENHAGEN) + timedelta(days=1)).date(),
+        datetime.min.time(),
+        tzinfo=COPENHAGEN,
+    )
+    tomorrow_end = tomorrow_start + timedelta(days=1)
+
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(ml.PREDICTION_SQL, {"start": tomorrow_start, "end": tomorrow_end})
+        features = pd.DataFrame(cur.fetchall(), columns=[c.name for c in cur.description])
+    if len(features) != 24:
+        raise dg.Failure(f"expected 24 feature rows for tomorrow, got {len(features)} "
+                         "(weather or price ingest incomplete?)")
+
+    model_path = ml.latest_model_path()
+    booster = lgb.Booster(model_file=str(model_path))
+    features = ml.encode_calendar(features)
+    predictions = booster.predict(features[ml.FEATURE_COLUMNS])
+
+    version = ml.model_version(model_path)
+    rows = [(ts, float(p), version) for ts, p in zip(features["ts"], predictions)]
+    upsert("price_predictions", ["ts", "predicted_price", "model_version"], rows,
+           ["ts", "model_version"])
+    return dg.MaterializeResult(metadata={
+        "model_version": version,
+        "avg_predicted": round(float(predictions.mean()), 3),
+        "min_predicted": round(float(predictions.min()), 3),
+        "max_predicted": round(float(predictions.max()), 3),
+    })
+
+
+# --- Telegram briefing -------------------------------------------------------
 
 
 def cheapest_window(hourly_avg: dict[int, float], size: int = 3) -> tuple[list[int] | None, float | None]:
@@ -346,6 +471,14 @@ briefing_job = dg.define_asset_job(
     "briefing_job", selection=dg.AssetSelection.assets("telegram_briefing")
 )
 
+weather_job = dg.define_asset_job(
+    "weather_job", selection=dg.AssetSelection.assets("weather_forecasts")
+)
+
+forecast_job = dg.define_asset_job(
+    "forecast_job", selection=dg.AssetSelection.assets("price_forecast")
+)
+
 
 @dg.schedule(
     job=ingest_job,
@@ -363,6 +496,27 @@ def daily_ingest_schedule(context: dg.ScheduleEvaluationContext):
 daily_briefing_schedule = dg.ScheduleDefinition(
     job=briefing_job,
     cron_schedule="15 22 * * *",
+    execution_timezone="Europe/Copenhagen",
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+)
+
+
+@dg.schedule(
+    job=weather_job,
+    cron_schedule="45 7 * * *",
+    execution_timezone="Europe/Copenhagen",
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+)
+def morning_weather_schedule(context: dg.ScheduleEvaluationContext):
+    """07:45 CPH — BEFORE the 12:00 day-ahead auction (the whole point: these are
+    the leak-free features a price forecast is allowed to see). Re-materializes the
+    current month partition, which also pulls tomorrow via the live forecast API."""
+    return dg.RunRequest(partition_key=context.scheduled_execution_time.strftime("%Y-%m-01"))
+
+
+morning_forecast_schedule = dg.ScheduleDefinition(
+    job=forecast_job,
+    cron_schedule="15 8 * * *",  # after the 07:45 weather fetch, well before 12:00
     execution_timezone="Europe/Copenhagen",
     default_status=dg.DefaultScheduleStatus.RUNNING,
 )
