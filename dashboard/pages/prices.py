@@ -148,6 +148,10 @@ def forecast_figure():
                                      mode="lines", line=line))
     fig.update_layout(base_layout(yaxis_title="DKK/kWh incl. VAT", height=360))
     fig.update_xaxes(hoverformat="%a %-d %b, %H:%M")
+    # while only a day or two of predictions exist, label every hour like the
+    # day-ahead chart; with more history the auto date ticks read better
+    if not df.empty and x[-1] - x[0] <= pd.Timedelta(hours=36):
+        fig.update_xaxes(tickformat="%H:%M", dtick=3_600_000, tickfont=dict(size=11))
     fig.update_yaxes(hoverformat=".2f")
     return fig
 
