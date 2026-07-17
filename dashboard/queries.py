@@ -103,11 +103,14 @@ def forecast_vs_actual(days: int = 14):
     """Model-predicted vs realized hourly DK1 price, trailing N days (the
     newest predictions cover tomorrow, so the predicted line runs ahead of
     the actual one until the auction result lands)."""
+    # DISTINCT ON: an hour can hold receipts from several model versions
+    # (e.g. a rerun after a model upgrade) — chart the newest prediction only
     return query_df(
         "SELECT p.ts, p.predicted_price, h.avg_price AS actual_price "
-        "FROM price_predictions p "
+        "FROM (SELECT DISTINCT ON (ts) ts, predicted_price FROM price_predictions "
+        "      WHERE ts >= now() - make_interval(days => %s) "
+        "      ORDER BY ts, predicted_at DESC) p "
         "LEFT JOIN prices_hourly h ON h.hour = p.ts AND h.price_area = 'DK1' "
-        "WHERE p.ts >= now() - make_interval(days => %s) "
         "ORDER BY p.ts",
         (days,),
     )
@@ -115,12 +118,15 @@ def forecast_vs_actual(days: int = 14):
 
 def forecast_mae_30d():
     """Rolling 30-day MAE of the price model — live monitoring headline."""
+    # newest receipt per hour, like forecast_vs_actual — double-counting an hour
+    # across model versions would skew the headline MAE
     return query_df(
         "SELECT round(avg(abs(p.predicted_price - h.avg_price))::numeric, 3) AS mae, "
         "       count(*) AS hours "
-        "FROM price_predictions p "
-        "JOIN prices_hourly h ON h.hour = p.ts AND h.price_area = 'DK1' "
-        "WHERE p.ts >= now() - interval '30 days'"
+        "FROM (SELECT DISTINCT ON (ts) ts, predicted_price FROM price_predictions "
+        "      WHERE ts >= now() - interval '30 days' "
+        "      ORDER BY ts, predicted_at DESC) p "
+        "JOIN prices_hourly h ON h.hour = p.ts AND h.price_area = 'DK1'"
     )
 
 
