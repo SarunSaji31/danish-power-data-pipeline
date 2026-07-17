@@ -9,6 +9,7 @@ from energy_etl.assets import (
     build_upsert_sql,
     cheapest_window,
     consumer_price,
+    format_hour_ranges,
     parse_gas_chart,
     parse_utc,
 )
@@ -43,6 +44,59 @@ class TestBuildUpsertSql:
         assert "ON CONFLICT (ts, area)" in sql
         assert "price = EXCLUDED.price" in sql
         assert "ts = EXCLUDED.ts" not in sql
+
+
+class TestBriefingAlerts:
+    def test_negative_hours_alert_with_merged_ranges(self):
+        prices = {h: 0.5 for h in range(24)}
+        prices[11] = prices[12] = prices[13] = -0.1
+        prices[15] = -0.05
+        text = build_briefing_text("Sat", prices, {}, {}, None, None)
+        assert "Negative prices 11:00–14:00, 15:00–16:00" in text
+
+    def test_expensive_day_alert_only_when_spiking(self):
+        prices = {h: 3.0 for h in range(24)}
+        assert "Expensive day" in build_briefing_text("Sat", prices, {}, {}, None, None,
+                                                      avg_30d=1.0)
+        assert "Expensive day" not in build_briefing_text("Sat", prices, {}, {}, None, None,
+                                                          avg_30d=2.5)
+
+    def test_ev_cost_line_uses_window_and_peak(self):
+        prices = {h: 2.0 for h in range(24)}
+        prices[3] = prices[4] = prices[5] = 0.5
+        text = build_briefing_text("Sat", prices, {}, {}, [3, 4, 5], 0.5)
+        assert "EV charge (60 kWh): ~30 kr in that window vs ~120 kr at the peak" in text
+
+    def test_ev_line_says_paid_when_window_is_negative(self):
+        prices = {h: 2.0 for h in range(24)}
+        prices[3] = prices[4] = prices[5] = -0.05
+        text = build_briefing_text("Sat", prices, {}, {}, [3, 4, 5], -0.05)
+        assert "you'd be <b>paid</b> ~3 kr" in text
+
+    def test_negative_zero_displays_as_zero_and_missing_wind_is_blank(self):
+        prices = {h: 1.0 for h in range(24)}
+        prices[12] = -0.004  # would format as "-0.00"
+        line = [l for l in build_briefing_text("Sat", prices, {}, {}, None, None).splitlines()
+                if l.startswith("12")][0]
+        assert "-0.00" not in line and "0.00" in line
+        assert line.split() == ["12", "0.00"]  # no wind data -> blank cell, no bar (price ~0)
+
+    def test_footer_links_to_dashboard(self):
+        text = build_briefing_text("Sat", {h: 1.0 for h in range(24)}, {}, {}, None, None)
+        assert "etl.sarunsaji.com" in text
+
+    def test_greenest_window_from_wind_and_solar(self):
+        prices = {h: 1.0 for h in range(24)}
+        wind = {h: 1000.0 for h in range(24)}
+        wind[10] = wind[11] = wind[12] = 4000.0
+        solar = {h: 0.0 for h in range(24)}
+        text = build_briefing_text("Sat", prices, wind, solar, None, None)
+        assert "Greenest 3 h: 10:00–13:00" in text
+
+
+class TestFormatHourRanges:
+    def test_merges_consecutive_and_splits_gaps(self):
+        assert format_hour_ranges([11, 12, 13, 15]) == "11:00–14:00, 15:00–16:00"
 
 
 class TestBuildForecastText:

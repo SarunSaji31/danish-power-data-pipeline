@@ -407,6 +407,19 @@ def cheapest_window(hourly_avg: dict[int, float], size: int = 3) -> tuple[list[i
 
 
 PRICE_BAR_WIDTH = 8  # max blocks in the per-hour price bar
+EV_BATTERY_KWH = 60          # typical EV battery, for the concrete-money line
+SPIKE_FACTOR = 1.5           # day avg >= 1.5x the 30-day normal -> expensive-day alert
+
+
+def format_hour_ranges(hours: list[int]) -> str:
+    """[11,12,13,15] -> '11:00–14:00, 15:00–16:00' (consecutive hours merged)."""
+    ranges: list[list[int]] = []
+    for h in sorted(hours):
+        if ranges and h == ranges[-1][1]:
+            ranges[-1][1] = h + 1
+        else:
+            ranges.append([h, h + 1])
+    return ", ".join(f"{a:02d}:00–{b:02d}:00" for a, b in ranges)
 
 
 def build_briefing_text(
@@ -416,15 +429,28 @@ def build_briefing_text(
     solar: dict[int, float],
     best_window: list[int] | None,
     best_cost: float | None,
+    avg_30d: float | None = None,
 ) -> str:
     """Telegram-HTML briefing: bold summary + monospace <pre> hourly table with price bars."""
     day_avg = sum(hourly_avg.values()) / len(hourly_avg)
     low_hour = min(hourly_avg, key=hourly_avg.get)
     high_hour = max(hourly_avg, key=hourly_avg.get)
 
-    lines = [
-        f"⚡ <b>DK1 Energy Brief</b> — {day_label}",
-        "",
+    lines = [f"⚡ <b>DK1 Energy Brief</b> — {day_label}", ""]
+
+    # event alerts first — the reason to open the message
+    alerts = []
+    if avg_30d and avg_30d > 0 and day_avg / avg_30d >= SPIKE_FACTOR:
+        alerts.append(f"🚨 <b>Expensive day: avg {day_avg:.2f} kr/kWh — "
+                      f"{day_avg / avg_30d:.1f}× the 30-day normal.</b> Shift what you can.")
+    negative_hours = [h for h, price in hourly_avg.items() if price < 0]
+    if negative_hours:
+        alerts.append(f"🤑 <b>Negative prices {format_hour_ranges(negative_hours)}</b> "
+                      "— you get paid to use power.")
+    if alerts:
+        lines += alerts + [""]
+
+    lines += [
         f"💰 Avg <b>{day_avg:.2f} kr/kWh</b>",
         f"🟢 Low {hourly_avg[low_hour]:.2f} at {low_hour:02d}:00 · "
         f"🔴 High {hourly_avg[high_hour]:.2f} at {high_hour:02d}:00",
@@ -434,22 +460,49 @@ def build_briefing_text(
             f"🔌 Cheapest 3 h: <b>{best_window[0]:02d}:00–{best_window[-1] + 1:02d}:00</b>"
             f" at {best_cost:.2f} kr/kWh"
         )
+        # kr/kWh means little to most readers — one concrete example does
+        window_cost = best_cost * EV_BATTERY_KWH
+        peak_cost = hourly_avg[high_hour] * EV_BATTERY_KWH
+        if window_cost < 0:
+            lines.append(
+                f"🚗 EV charge ({EV_BATTERY_KWH} kWh): you'd be <b>paid</b> "
+                f"~{abs(window_cost):,.0f} kr — vs ~{peak_cost:,.0f} kr at the peak"
+            )
+        else:
+            lines.append(
+                f"🚗 EV charge ({EV_BATTERY_KWH} kWh): ~{window_cost:,.0f} kr"
+                f" in that window vs ~{peak_cost:,.0f} kr at the peak"
+            )
     if wind:
         lines.append(
             f"💨 Wind avg {sum(wind.values()) / len(wind):,.0f} MW · "
             f"☀️ Solar peak {max(solar.values()):,.0f} MW"
         )
+        # greenest = highest wind+solar; cheapest_window on negated MW finds the max
+        renewables = {h: -(wind.get(h, 0) + solar.get(h, 0)) for h in hourly_avg}
+        green_window, green_neg_mw = cheapest_window(renewables)
+        if green_window:
+            lines.append(
+                f"🌱 Greenest 3 h: {green_window[0]:02d}:00–{green_window[-1] + 1:02d}:00"
+                f" ({-green_neg_mw:,.0f} MW wind+solar)"
+            )
 
     # hourly table: monospace so columns align; bar visualizes price, ◀ marks cheapest window
     max_price = max(hourly_avg.values())
     window_hours = set(best_window or [])
-    table = [f"hr  kr/kWh  {'wind':>6}"]
+    table = [f"hr  kr/kWh  {'wind MW':>7}"]
     for h in sorted(hourly_avg):
-        blocks = round(max(hourly_avg[h], 0) / max_price * PRICE_BAR_WIDTH) if max_price > 0 else 0
+        price = hourly_avg[h]
+        if abs(price) < 0.005:
+            price = 0.0  # avoid a confusing "-0.00" cell
+        blocks = round(max(price, 0) / max_price * PRICE_BAR_WIDTH) if max_price > 0 else 0
         mark = " ◀" if h in window_hours else ""
-        table.append(f"{h:02d}  {hourly_avg[h]:6.2f}  {wind.get(h, 0):6,.0f}  {'▍' * blocks}{mark}")
+        # blank wind cell when data is missing — "0" would read as calm, not unknown
+        wind_cell = f"{wind[h]:7,.0f}" if h in wind else " " * 7
+        table.append(f"{h:02d}  {price:6.2f}  {wind_cell}  {'▍' * blocks}{mark}")
 
-    lines += ["", "<pre>" + "\n".join(table) + "</pre>", "<i>◀ cheapest 3-hour window</i>"]
+    lines += ["", "<pre>" + "\n".join(table) + "</pre>", "<i>◀ cheapest 3-hour window</i>",
+              "<i>📊 Charts and history: etl.sarunsaji.com</i>"]
     return "\n".join(lines)
 
 
@@ -493,6 +546,13 @@ def telegram_briefing(context: dg.AssetExecutionContext) -> dg.MaterializeResult
                 (tomorrow_start, tomorrow_end),
             )
             forecast_rows = cur.fetchall()
+            # 30-day reference for the expensive-day alert
+            cur.execute(
+                "SELECT avg(price_dkk_kwh) FROM spot_prices "
+                "WHERE price_area = 'DK1' AND ts >= %s - interval '30 days' AND ts < %s",
+                (tomorrow_start, tomorrow_start),
+            )
+            avg_30d = cur.fetchone()[0]
 
     day_label = tomorrow_start.strftime("%a %d %b")
     if not price_rows:
@@ -514,7 +574,8 @@ def telegram_briefing(context: dg.AssetExecutionContext) -> dg.MaterializeResult
     # cheapest consecutive 3-hour window (for EV charging / appliances)
     best_window, best_cost = cheapest_window(hourly_avg)
 
-    send_telegram(build_briefing_text(day_label, hourly_avg, wind, solar, best_window, best_cost))
+    send_telegram(build_briefing_text(day_label, hourly_avg, wind, solar,
+                                      best_window, best_cost, avg_30d))
     day_avg = sum(hourly_avg.values()) / len(hourly_avg)
     return dg.MaterializeResult(
         metadata={"sent": "briefing", "hours": len(hourly_avg), "avg_price": round(day_avg, 3)}
