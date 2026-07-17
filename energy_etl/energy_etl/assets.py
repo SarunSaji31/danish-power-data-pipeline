@@ -453,10 +453,16 @@ def build_briefing_text(
     return "\n".join(lines)
 
 
-def send_telegram(text: str) -> None:
+def send_telegram(text: str, chat_id: str | None = None) -> None:
+    """Post to Telegram. Default target (TELEGRAM_CHAT_ID) is the PUBLIC channel,
+    which gets ONLY official market prices (the evening brief). Everything else —
+    model predictions, alerts, any ops message — must pass the private chat id
+    explicitly: os.environ["TELEGRAM_PRIVATE_CHAT_ID"] (a hard lookup, so a
+    missing var fails the run instead of leaking to the public channel)."""
     response = requests.post(
         f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
-        json={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text, "parse_mode": "HTML"},
+        json={"chat_id": chat_id or os.environ["TELEGRAM_CHAT_ID"],
+              "text": text, "parse_mode": "HTML"},
         timeout=30,
     )
     response.raise_for_status()
@@ -490,7 +496,9 @@ def telegram_briefing(context: dg.AssetExecutionContext) -> dg.MaterializeResult
 
     day_label = tomorrow_start.strftime("%a %d %b")
     if not price_rows:
-        send_telegram(f"⚠️ DK Energy Brief: no day-ahead prices for {day_label} yet.")
+        # ops alert, not market data — goes to the private chat, never the channel
+        send_telegram(f"⚠️ DK Energy Brief: no day-ahead prices for {day_label} yet.",
+                      chat_id=os.environ["TELEGRAM_PRIVATE_CHAT_ID"])
         return dg.MaterializeResult(metadata={"sent": "no-data alert"})
 
     # average 15-min prices into local hours
@@ -513,6 +521,82 @@ def telegram_briefing(context: dg.AssetExecutionContext) -> dg.MaterializeResult
     )
 
 
+def build_forecast_text(
+    day_label: str,
+    hourly_price: dict[int, float],
+    best_window: list[int] | None,
+    best_cost: float | None,
+) -> str:
+    """Morning channel post: the MODEL's predicted prices for tomorrow — clearly
+    labeled as a forecast, since official prices don't exist until ~13:00."""
+    day_avg = sum(hourly_price.values()) / len(hourly_price)
+    low_hour = min(hourly_price, key=hourly_price.get)
+    high_hour = max(hourly_price, key=hourly_price.get)
+
+    lines = [
+        f"🔮 <b>DK1 Price Forecast</b> — {day_label} <i>(model prediction)</i>",
+        "",
+        f"💰 Predicted avg <b>{day_avg:.2f} kr/kWh</b>",
+        f"🟢 Low {hourly_price[low_hour]:.2f} at {low_hour:02d}:00 · "
+        f"🔴 High {hourly_price[high_hour]:.2f} at {high_hour:02d}:00",
+    ]
+    if best_window:
+        lines.append(
+            f"🔌 Cheapest 3 h: <b>{best_window[0]:02d}:00–{best_window[-1] + 1:02d}:00</b>"
+            f" at {best_cost:.2f} kr/kWh"
+        )
+
+    max_price = max(hourly_price.values())
+    window_hours = set(best_window or [])
+    table = ["hr  kr/kWh"]
+    for h in sorted(hourly_price):
+        blocks = round(max(hourly_price[h], 0) / max_price * PRICE_BAR_WIDTH) if max_price > 0 else 0
+        mark = " ◀" if h in window_hours else ""
+        table.append(f"{h:02d}  {hourly_price[h]:6.2f}  {'▍' * blocks}{mark}")
+
+    lines += [
+        "", "<pre>" + "\n".join(table) + "</pre>", "<i>◀ cheapest 3-hour window</i>",
+        "<i>Predicted before the 12:00 auction — official prices arrive ~13:00 "
+        "and are posted here in the evening brief.</i>",
+    ]
+    return "\n".join(lines)
+
+
+@dg.asset(deps=[price_forecast])
+def forecast_briefing(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
+    """Morning post of the model's predictions for tomorrow, to the PRIVATE chat
+    (runs in forecast_job right after price_forecast — no prediction, no post)."""
+    tomorrow_start = datetime.combine(
+        (datetime.now(COPENHAGEN) + timedelta(days=1)).date(),
+        datetime.min.time(),
+        tzinfo=COPENHAGEN,
+    )
+    tomorrow_end = tomorrow_start + timedelta(days=1)
+
+    with get_connection() as conn, conn.cursor() as cur:
+        # newest receipt per hour: reruns/model upgrades may stack versions
+        cur.execute(
+            "SELECT DISTINCT ON (ts) ts, predicted_price FROM price_predictions "
+            "WHERE ts >= %s AND ts < %s ORDER BY ts, predicted_at DESC",
+            (tomorrow_start, tomorrow_end),
+        )
+        rows = cur.fetchall()
+    if len(rows) != 24:
+        raise dg.Failure(f"expected 24 predictions for tomorrow, got {len(rows)}")
+
+    hourly_price = {ts.astimezone(COPENHAGEN).hour: price for ts, price in rows}
+    best_window, best_cost = cheapest_window(hourly_price)
+    day_label = tomorrow_start.strftime("%a %d %b")
+    # model output is NOT official market data — private chat only (user rule:
+    # the public channel carries nothing but actual prices)
+    send_telegram(build_forecast_text(day_label, hourly_price, best_window, best_cost),
+                  chat_id=os.environ["TELEGRAM_PRIVATE_CHAT_ID"])
+    return dg.MaterializeResult(metadata={
+        "sent": "forecast briefing",
+        "avg_predicted": round(sum(hourly_price.values()) / 24, 3),
+    })
+
+
 # --- Jobs & schedules --------------------------------------------------------
 
 ingest_job = dg.define_asset_job(
@@ -531,7 +615,8 @@ weather_job = dg.define_asset_job(
 )
 
 forecast_job = dg.define_asset_job(
-    "forecast_job", selection=dg.AssetSelection.assets("price_forecast")
+    "forecast_job",
+    selection=dg.AssetSelection.assets("price_forecast", "forecast_briefing"),
 )
 
 # gas can't join weather_job: unpartitioned assets don't mix with partitioned ones

@@ -5,6 +5,7 @@ import pytest
 from energy_etl.assets import (
     FIFTEEN_MIN_SWITCH,
     build_briefing_text,
+    build_forecast_text,
     build_upsert_sql,
     cheapest_window,
     consumer_price,
@@ -42,6 +43,24 @@ class TestBuildUpsertSql:
         assert "ON CONFLICT (ts, area)" in sql
         assert "price = EXCLUDED.price" in sql
         assert "ts = EXCLUDED.ts" not in sql
+
+
+class TestBuildForecastText:
+    def test_labeled_as_prediction_with_window_marked(self):
+        prices = {h: 1.0 for h in range(24)}
+        prices[3] = prices[4] = prices[5] = 0.2  # cheap night window
+        text = build_forecast_text("Sat 18 Jul", prices, [3, 4, 5], 0.2)
+        assert "model prediction" in text
+        assert "03:00–06:00" in text
+        assert text.count("◀") >= 3  # the 3 window rows are marked
+        assert "official prices arrive" in text  # never passes off as official
+
+    def test_negative_predicted_price_gets_empty_bar(self):
+        prices = {h: 1.0 for h in range(24)}
+        prices[14] = -0.4
+        line = [l for l in build_forecast_text("Sun", prices, None, None).splitlines()
+                if l.startswith("14")][0]
+        assert "▍" not in line
 
 
 class TestParseGasChart:
