@@ -22,17 +22,15 @@ from sklearn.linear_model import LinearRegression
 
 import os
 
-from energy_etl.ml import CALENDAR_CATEGORIES, TRAINING_SQL, encode_calendar
+from energy_etl.ml import CALENDAR_CATEGORIES, FEATURE_COLUMNS, TRAINING_SQL, encode_calendar
 
 REPO = Path(__file__).resolve().parent.parent
 N_TEST_MONTHS = 24
 
 CALENDAR_FEATURES = list(CALENDAR_CATEGORIES)
-NUMERIC_FEATURES = [
-    "price_lag_24h", "price_lag_168h", "price_avg_prev24h",
-    "wind_jutland_ms", "wind_northsea_ms", "wind_zealand_ms",
-    "solar_rad_wm2", "temp_c",
-]
+# derived from the contract, not repeated: a hand-kept copy would silently
+# drop any feature added to energy_etl.ml
+NUMERIC_FEATURES = [c for c in FEATURE_COLUMNS if c not in CALENDAR_CATEGORIES]
 TARGET = "target_price"
 
 LGBM_PARAMS = dict(

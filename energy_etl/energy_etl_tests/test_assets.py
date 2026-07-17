@@ -8,8 +8,10 @@ from energy_etl.assets import (
     build_upsert_sql,
     cheapest_window,
     consumer_price,
+    parse_gas_chart,
     parse_utc,
 )
+from energy_etl import ml
 
 
 class TestParseUtc:
@@ -40,6 +42,29 @@ class TestBuildUpsertSql:
         assert "ON CONFLICT (ts, area)" in sql
         assert "price = EXCLUDED.price" in sql
         assert "ts = EXCLUDED.ts" not in sql
+
+
+class TestParseGasChart:
+    def test_timestamps_become_utc_dates_and_nulls_are_skipped(self):
+        result = {
+            "timestamp": [1661472000, 1661558400],  # 2022-08-26, 2022-08-27 UTC
+            "indicators": {"quote": [{"close": [339.20, None]}]},
+        }
+        assert parse_gas_chart(result) == [(datetime(2022, 8, 26).date(), 339.20)]
+
+    def test_empty_window_has_no_timestamp_key(self):
+        result = {"indicators": {"quote": [{"close": []}]}}
+        assert parse_gas_chart(result) == []
+
+
+class TestLatestModelPath:
+    def test_monthly_legacy_name_sorts_as_day_one(self, tmp_path, monkeypatch):
+        # lexically 'model_2026-07.txt' > 'model_2026-07-17.txt' ('.' > '-');
+        # version-date ordering must pick the daily-named retrain anyway
+        for name in ["model_2026-07.txt", "model_2026-07-17.txt"]:
+            (tmp_path / name).touch()
+        monkeypatch.setattr(ml, "MODELS_DIR", tmp_path)
+        assert ml.latest_model_path().name == "model_2026-07-17.txt"
 
 
 class TestCheapestWindow:

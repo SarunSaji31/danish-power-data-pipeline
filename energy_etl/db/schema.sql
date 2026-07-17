@@ -66,7 +66,16 @@ CREATE TABLE IF NOT EXISTS weather_forecasts (
 SELECT create_hypertable('weather_forecasts', 'ts',
     chunk_time_interval => interval '1 month', if_not_exists => TRUE);
 
--- 6. Model predictions of DK1 day-ahead prices (written each morning BEFORE the
+-- 6. Daily TTF gas settlement price (Yahoo Finance TTF=F front-month futures,
+-- EUR/MWh, trading days only). ML regime feature: gas plants set the power price
+-- in low-wind hours. Plain table on purpose — ~250 rows/year needs no hypertable.
+CREATE TABLE IF NOT EXISTS gas_prices (
+    date           date PRIMARY KEY,     -- settlement (trading) day
+    close_eur_mwh  double precision,
+    created_at     timestamptz DEFAULT now()
+);
+
+-- 7. Model predictions of DK1 day-ahead prices (written each morning BEFORE the
 -- 12:00 auction; actuals publish ~13:00). Rows are receipts: never re-predicted,
 -- keyed by model_version so every prediction traces to the exact model file.
 CREATE TABLE IF NOT EXISTS price_predictions (

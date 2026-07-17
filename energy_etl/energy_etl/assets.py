@@ -294,12 +294,67 @@ def weather_forecasts(context: dg.AssetExecutionContext) -> dg.MaterializeResult
     return dg.MaterializeResult(metadata={"rows_upserted": len(rows)})
 
 
+# --- Gas prices (Yahoo Finance, ML regime feature) ----------------------------
+
+YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/TTF=F"
+
+# Fetch from Dec 2020 so the earliest training rows (Jan 2021) have a settlement
+# to look back on. Unofficial source, documented as such: TTF settlements are
+# ICE/EEX exchange data with no free official API.
+GAS_HISTORY_START = datetime(2020, 12, 1, tzinfo=timezone.utc)
+
+
+def parse_gas_chart(result: dict) -> list[tuple]:
+    """(date, close) per trading day from a Yahoo chart result; null closes
+    (halts, partial rows) are skipped. Empty windows carry no 'timestamp' key."""
+    closes = result["indicators"]["quote"][0]["close"]
+    return [
+        (datetime.fromtimestamp(ts, tz=timezone.utc).date(), close)
+        for ts, close in zip(result.get("timestamp", []), closes)
+        if close is not None
+    ]
+
+
+def fetch_gas_closes(start: datetime, end: datetime) -> list[tuple]:
+    """Daily TTF settlement closes for [start, end). Explicit period windows are
+    required: range-style requests silently downsample old data to ~weekly."""
+    response = requests.get(
+        YAHOO_CHART,
+        params={"period1": int(start.timestamp()), "period2": int(end.timestamp()),
+                "interval": "1d"},
+        headers={"User-Agent": "Mozilla/5.0"},  # default UA is rejected
+        timeout=60,
+    )
+    response.raise_for_status()
+    return parse_gas_chart(response.json()["chart"]["result"][0])
+
+
+@dg.asset
+def gas_prices(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
+    """Daily TTF gas settlement price (front-month futures, EUR/MWh). The regime
+    feature the price model lacks: gas plants set the power price in low-wind
+    hours. Unpartitioned — the full history is ~1,400 rows, so every run refetches
+    2020-12 -> now (one call per calendar year) and idempotently upserts; the
+    first production run doubles as the backfill."""
+    now = datetime.now(timezone.utc)
+    rows: list[tuple] = []
+    start = GAS_HISTORY_START
+    while start < now:
+        end = min(datetime(start.year + 1, 1, 1, tzinfo=timezone.utc), now)
+        rows += fetch_gas_closes(start, end)
+        start = end
+    context.log.info(f"Fetched {len(rows)} gas settlement rows")
+
+    upsert("gas_prices", ["date", "close_eur_mwh"], rows, ["date"])
+    return dg.MaterializeResult(metadata={"rows_upserted": len(rows)})
+
+
 # --- Price forecast (ML model) ------------------------------------------------
 
 COPENHAGEN = ZoneInfo("Europe/Copenhagen")
 
 
-@dg.asset(deps=[spot_prices, weather_forecasts])
+@dg.asset(deps=[spot_prices, weather_forecasts, gas_prices])
 def price_forecast(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     """Predict tomorrow's 24 hourly DK1 prices BEFORE the 12:00 day-ahead auction
     (actuals publish ~13:00 — a later prediction would be worthless). Features are
@@ -479,6 +534,9 @@ forecast_job = dg.define_asset_job(
     "forecast_job", selection=dg.AssetSelection.assets("price_forecast")
 )
 
+# gas can't join weather_job: unpartitioned assets don't mix with partitioned ones
+gas_job = dg.define_asset_job("gas_job", selection=dg.AssetSelection.assets("gas_prices"))
+
 
 @dg.schedule(
     job=ingest_job,
@@ -513,6 +571,16 @@ def morning_weather_schedule(context: dg.ScheduleEvaluationContext):
     current month partition, which also pulls tomorrow via the live forecast API."""
     return dg.RunRequest(partition_key=context.scheduled_execution_time.strftime("%Y-%m-01"))
 
+
+# 07:45 CPH like the weather fetch (the run queue serializes them); the model
+# only ever reads settlements <= two days before the target day, so "yesterday's
+# close, fetched this morning" is always already final.
+morning_gas_schedule = dg.ScheduleDefinition(
+    job=gas_job,
+    cron_schedule="45 7 * * *",
+    execution_timezone="Europe/Copenhagen",
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+)
 
 morning_forecast_schedule = dg.ScheduleDefinition(
     job=forecast_job,

@@ -21,6 +21,7 @@ FEATURE_COLUMNS = [
     "price_lag_24h", "price_lag_168h", "price_avg_prev24h",
     "wind_jutland_ms", "wind_northsea_ms", "wind_zealand_ms",
     "solar_rad_wm2", "temp_c",
+    "gas_eur_mwh",
     "hour_cph", "weekday", "month",
 ]
 
@@ -41,8 +42,13 @@ def encode_calendar(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def latest_model_path() -> Path:
-    """Newest model file; version sorts lexically (model_YYYY-MM.txt)."""
-    return sorted(MODELS_DIR.glob("model_*.txt"))[-1]
+    """Newest model file by version date. Versions are YYYY-MM-DD; the first
+    model used YYYY-MM, which must sort as day 01 — plain lexical order would
+    rank 'model_2026-07.txt' after 'model_2026-07-17.txt' ('.' > '-')."""
+    def version_date(path: Path) -> str:
+        version = model_version(path)
+        return version + "-01" if len(version) == 7 else version
+    return max(MODELS_DIR.glob("model_*.txt"), key=version_date)
 
 
 def model_version(path: Path) -> str:
@@ -92,9 +98,19 @@ SELECT l.ts,
        w.wind_zealand_ms,
        w.solar_rad_wm2,
        w.temp_c,
+       g.gas_eur_mwh,
        l.price AS target_price
 FROM lagged l
 JOIN weather w USING (ts)
+-- gas vintage rule: for target day T use the last settlement dated <= T-2 —
+-- the newest one that existed at the 08:15 prediction run on T-1 (T-1's own
+-- close happens that evening); "<=" forward-fills weekends and holidays
+LEFT JOIN LATERAL (
+    SELECT close_eur_mwh AS gas_eur_mwh
+    FROM gas_prices
+    WHERE date <= (l.ts AT TIME ZONE 'Europe/Copenhagen')::date - 2
+    ORDER BY date DESC LIMIT 1
+) g ON true
 WHERE l.price_lag_168h IS NOT NULL
 ORDER BY l.ts
 """
@@ -138,10 +154,18 @@ SELECT h.ts,
        w.wind_northsea_ms,
        w.wind_zealand_ms,
        w.solar_rad_wm2,
-       w.temp_c
+       w.temp_c,
+       g.gas_eur_mwh
 FROM hours h
 JOIN hourly  l24  ON l24.ts  = h.ts - interval '24 hours'
 JOIN hourly  l168 ON l168.ts = h.ts - interval '168 hours'
 JOIN weather w    ON w.ts    = h.ts
+-- same gas vintage rule as TRAINING_SQL: last settlement dated <= target day - 2
+LEFT JOIN LATERAL (
+    SELECT close_eur_mwh AS gas_eur_mwh
+    FROM gas_prices
+    WHERE date <= (h.ts AT TIME ZONE 'Europe/Copenhagen')::date - 2
+    ORDER BY date DESC LIMIT 1
+) g ON true
 ORDER BY h.ts
 """
